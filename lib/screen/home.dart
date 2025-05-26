@@ -100,14 +100,17 @@ class _HomePageState extends State<HomePage> {
         title: Text('Hangout'.toUpperCase()),
         actions: [
           IconButton(
-            tooltip: 'Help',
+            tooltip: 'Setting',
             onPressed: () {
               _redirectTo(
-                  context,
-                   SettingPage(settingProvider: Provider.of<SettingProvider>(context, listen: false),),
-                  );
+                context,
+                SettingPage(
+                  settingProvider:
+                      Provider.of<SettingProvider>(context, listen: false),
+                ),
+              );
             },
-            icon: const Icon(Icons.help),
+            icon: const Icon(Icons.settings),
           ),
         ],
       ),

@@ -1,7 +1,12 @@
+import 'package:flutter_map/flutter_map.dart';
+import 'package:flutter_map_cancellable_tile_provider/flutter_map_cancellable_tile_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:hangout/screen/chat.dart';
 import 'package:firebase_analytics/firebase_analytics.dart';
+import 'package:latlong2/latlong.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 
 class QueryForm extends StatefulWidget {
   const QueryForm({super.key});
@@ -13,6 +18,10 @@ class QueryForm extends StatefulWidget {
 class _QueryFormState extends State<QueryForm> {
   final _formKey = GlobalKey<FormState>();
   bool _showAdvancedOptions = false;
+
+  LatLng? _selectedLocation;
+  bool _showMap = false;
+  final MapController _mapController = MapController();
 
   // Form controllers
   final _locationController =
@@ -26,6 +35,7 @@ class _QueryFormState extends State<QueryForm> {
   String _activityType = 'No Preference';
   String _environment = 'No Preference';
   String _cost = 'No Preference';
+  String _dining = 'No Preference';
   String _pace = 'No Preference';
   String _transitPreference = 'No Preference';
   final List<String> _ambience = [];
@@ -33,21 +43,43 @@ class _QueryFormState extends State<QueryForm> {
   String _energyLevel = 'No Preference';
   String _accessibility = 'No Preference';
 
+  bool _isLoadingAddress = false;
+
   @override
   void initState() {
     super.initState();
     _getCurrentLocation();
   }
 
+  Future<String> _getAddressFromCoordinates(LatLng point) async {
+    String results = '${point.latitude}, ${point.longitude}';
+    try {
+      setState(() {
+        _isLoadingAddress = true;
+        _locationController.text = 'Getting Address...';
+      });
+      final response = await http.get(Uri.parse(
+          'https://nominatim.openstreetmap.org/reverse?format=json&lat=${point.latitude}&lon=${point.longitude}&zoom=18&addressdetails=1'));
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        final address = data['display_name'] as String;
+
+        results = address;
+      }
+    } catch (e) {
+      print('Error getting address: $e');
+    }
+    setState(() {
+      _isLoadingAddress = false;
+    });
+    return Future.value(results);
+  }
+
   Future<void> _getCurrentLocation() async {
     try {
       Position position = await Geolocator.getCurrentPosition();
-      // Here you would typically reverse geocode the position to get the address
-      // For now, we'll just use the coordinates
-      setState(() {
-        _locationController.text =
-            '${position.latitude}, ${position.longitude}';
-      });
+      _getAddressFromCoordinates(LatLng(position.latitude, position.longitude));
     } catch (e) {
       // Handle error or keep default location
     }
@@ -60,16 +92,71 @@ class _QueryFormState extends State<QueryForm> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Basic Fields
           TextFormField(
             controller: _locationController,
-            decoration: const InputDecoration(
+            decoration: InputDecoration(
               labelText: 'Current Location',
-              icon: Icon(Icons.location_on),
+              icon: const Icon(Icons.location_on),
+              suffixIcon: IconButton(
+                icon: const Icon(Icons.map),
+                onPressed: () {
+                  setState(() {
+                    _showMap = !_showMap;
+                  });
+                },
+              ),
             ),
+            onTap: () {
+              setState(() {
+                _showMap = !_showMap;
+              });
+            },
           ),
-          const SizedBox(height: 16),
+          if (_showMap)
+            Container(
+              height: 300,
+              margin: const EdgeInsets.symmetric(vertical: 16),
+              child: FlutterMap(
+                mapController: _mapController,
+                options: MapOptions(
+                  initialCenter: _selectedLocation ??
+                      const LatLng(49.2827, -123.1207), // Default to Vancouver
+                  initialZoom: 14,
+                  onTap: (tapPosition, point) async {
+                    setState(() {
+                      _selectedLocation = point;
+                    });
 
+                    // Get address using Nominatim
+                    final address = await _getAddressFromCoordinates(point);
+                    _locationController.text = address;
+                  },
+                ),
+                children: [
+                  TileLayer(
+                    tileProvider: CancellableNetworkTileProvider(),
+                    urlTemplate:
+                        'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                  ),
+                  if (_selectedLocation != null)
+                    MarkerLayer(
+                      markers: [
+                        Marker(
+                          point: _selectedLocation!,
+                          width: 80,
+                          height: 80,
+                          child: const Icon(
+                            Icons.location_pin,
+                            color: Colors.red,
+                            size: 40,
+                          ),
+                        ),
+                      ],
+                    ),
+                ],
+              ),
+            ),
+          const SizedBox(height: 16),
           TextFormField(
             controller: _peopleController,
             keyboardType: TextInputType.number,
@@ -147,23 +234,26 @@ class _QueryFormState extends State<QueryForm> {
 
           // Submit Button
           FilledButton(
-            onPressed: () {
-              if (_formKey.currentState!.validate()) {
-                FirebaseAnalytics.instance
-            .logEvent(name: 'receipt_gemini_request', parameters: {
-          'status': "empty",
-        });
-                final prompt = _generatePrompt();
+            onPressed: (_isLoadingAddress)
+                ? null
+                : () {
+                    if (_formKey.currentState!.validate()) {
+                      FirebaseAnalytics.instance.logEvent(
+                          name: 'receipt_gemini_request',
+                          parameters: {
+                            'status': "empty",
+                          });
+                      final prompt = _generatePrompt();
 
-                Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (context) => ChatPage(
-                      initialPrompt: prompt,
-                    ),
-                  ),
-                );
-              }
-            },
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (context) => ChatPage(
+                            initialPrompt: prompt,
+                          ),
+                        ),
+                      );
+                    }
+                  },
             child: const Padding(
               padding: EdgeInsets.all(16.0),
               child: Text('Generate Suggestions'),
@@ -182,6 +272,8 @@ class _QueryFormState extends State<QueryForm> {
         _buildDropdown('Environment', _environment, ['Indoor', 'Outdoor']),
         _buildDropdown(
             'Cost', _cost, ['Free', 'Low Cost', 'Moderate', 'High End']),
+        _buildDropdown('Dining', _dining,
+            ['Required', 'Optional', 'Snack Only', 'No Eating']),
         _buildDropdown('Pace', _pace, [
           'Few, Longer Activities',
           'Many, Shorter Activities',
@@ -207,11 +299,15 @@ class _QueryFormState extends State<QueryForm> {
             'Weather', _weather, ['Raining', 'Hot', 'Cold', 'Shine']),
         _buildDropdown('Energy Level', _energyLevel,
             ['Feeling Low Energy', 'Normal Energy', 'High Energy/Adventurous']),
-        _buildDropdown('Accessibility', _accessibility, [
-          'Easy Access',
-          'Requires Minimal Walking',
-          'Driving/Parking Friendly'
-        ]),
+        _buildDropdown(
+          'Accessibility',
+          _accessibility,
+          [
+            'Easy Access',
+            'Requires Minimal Walking',
+            'Driving/Parking Friendly'
+          ],
+        ),
       ],
     );
   }
@@ -307,6 +403,7 @@ Time: ${_fromTime.format(context)} to ${_toTime.format(context)} ($duration)
 Activity Type: $_activityType
 Environment: $_environment
 Cost Level: $_cost
+Dining: $_dining
 Pace: $_pace
 Transit Preference: $_transitPreference
 Ambience: $ambienceStr

@@ -44,6 +44,9 @@ dependencies:
   firebase_core: ^3.13.0
   firebase_analytics: ^11.4.5
   geolocator: ^14.0.0
+  flutter_map: any
+  latlong2: any
+  flutter_map_cancellable_tile_provider: any
 
 dev_dependencies:
   flutter_test:

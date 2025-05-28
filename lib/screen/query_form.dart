@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_map_cancellable_tile_provider/flutter_map_cancellable_tile_provider.dart';
 import 'package:flutter/material.dart';
@@ -6,6 +7,7 @@ import 'package:hangout/screen/chat.dart';
 import 'package:firebase_analytics/firebase_analytics.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:http/http.dart' as http;
+import 'dart:async';
 import 'dart:convert';
 
 class QueryForm extends StatefulWidget {
@@ -58,28 +60,48 @@ class _QueryFormState extends State<QueryForm> {
         _isLoadingAddress = true;
         _locationController.text = 'Getting Address...';
       });
-      final response = await http.get(Uri.parse(
-          'https://nominatim.openstreetmap.org/reverse?format=json&lat=${point.latitude}&lon=${point.longitude}&zoom=18&addressdetails=1'));
-
+      final response = await http
+          .get(
+        Uri.parse(
+          'https://nominatim.openstreetmap.org/reverse?format=json&lat=${point.latitude}&lon=${point.longitude}&zoom=18&addressdetails=1',
+        ),
+      )
+          .timeout(
+        const Duration(seconds: 3),
+        onTimeout: () {
+          throw TimeoutException('The request timed out');
+        },
+      );
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         final address = data['display_name'] as String;
-
         results = address;
       }
+    } on TimeoutException {
+      if (kDebugMode) {
+        print('Address lookup timed out');
+      }
+      results =
+          '${point.latitude}, ${point.longitude} (Address lookup timed out)';
     } catch (e) {
-      print('Error getting address: $e');
+      if (kDebugMode) {
+        print('Error getting address: $e');
+      }
+    } finally {
+      setState(() {
+        _isLoadingAddress = false;
+      });
     }
-    setState(() {
-      _isLoadingAddress = false;
-    });
-    return Future.value(results);
+    return results;
   }
 
   Future<void> _getCurrentLocation() async {
     try {
       Position position = await Geolocator.getCurrentPosition();
-      _getAddressFromCoordinates(LatLng(position.latitude, position.longitude));
+      _selectedLocation = LatLng(position.latitude, position.longitude);
+      final address = await _getAddressFromCoordinates(
+          LatLng(position.latitude, position.longitude));
+      _locationController.text = address;
     } catch (e) {
       // Handle error or keep default location
     }
@@ -296,7 +318,7 @@ class _QueryFormState extends State<QueryForm> {
           'Modern/Contemporary'
         ]),
         _buildDropdown(
-            'Weather', _weather, ['Raining', 'Hot', 'Cold', 'Shine']),
+            'Weather', _weather, ['Raining', 'Hot', 'Cold', 'Shine', 'Snowy']),
         _buildDropdown('Energy Level', _energyLevel,
             ['Feeling Low Energy', 'Normal Energy', 'High Energy/Adventurous']),
         _buildDropdown(
@@ -412,13 +434,19 @@ Energy Level: $_energyLevel
 Accessibility: $_accessibility
 
 Please provide a detailed schedule that includes:
-1. Specific locations or activities
-2. Estimated time for each activity
-3. Travel time between locations
-4. Brief description of each suggested place
-5. Any relevant tips or considerations based on the weather and preferences
+1. Specific locations
+2. Specific activities to be performed
+3. Estimated time for each activity
+4. Travel time between locations
+5. Brief description of each suggested place
+6. Any relevant tips or considerations based on the weather and preferences
 
-Format the response in a clear, easy-to-follow structure.
+Requirements of the suggestion
+1. Be clear and easy to follow
+2. Be specific and detailed for map and activity
+3. Never suggest places like non-public areas (i.e. home, company, etc.)
+4. Depends on the preference, you may suggest that might not surround with the given area
+5. The current location is just the starting point
 ''';
   }
 

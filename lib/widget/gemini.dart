@@ -403,21 +403,24 @@ class GeminiChatRoomDialog extends StatelessWidget {
       child: SizedBox(
         width: MediaQuery.of(context).size.width * 0.8,
         height: MediaQuery.of(context).size.height * 0.7,
-        child: Stack(
-          children: [
-            GeminiChatWidget(
-              chat: chat,
-            ),
-            Align(
-              alignment: Alignment.topRight,
-              child: IconButton(
-                icon: const Icon(Icons.close),
-                onPressed: () {
-                  Navigator.of(context).pop();
-                },
+        child: Padding(
+          padding: const EdgeInsets.all(8.0),
+          child: Stack(
+            children: [
+              GeminiChatWidget(
+                chat: chat,
               ),
-            )
-          ],
+              Align(
+                alignment: Alignment.topRight,
+                child: IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: () {
+                    Navigator.of(context).pop();
+                  },
+                ),
+              )
+            ],
+          ),
         ),
       ),
     );

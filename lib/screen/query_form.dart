@@ -3,7 +3,8 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_map_cancellable_tile_provider/flutter_map_cancellable_tile_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:hangout/screen/chat.dart';
+import 'package:hangout/screen/schedule_suggestion.dart';
+import 'package:hangout/utils/prompt.dart';
 import 'package:firebase_analytics/firebase_analytics.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:http/http.dart' as http;
@@ -269,7 +270,7 @@ class _QueryFormState extends State<QueryForm> {
 
                       Navigator.of(context).push(
                         MaterialPageRoute(
-                          builder: (context) => ChatPage(
+                          builder: (context) => ResultPage(
                             initialPrompt: prompt,
                           ),
                         ),
@@ -441,12 +442,7 @@ Please provide a detailed schedule that includes:
 5. Brief description of each suggested place
 6. Any relevant tips or considerations based on the weather and preferences
 
-Requirements of the suggestion
-1. Be clear and easy to follow
-2. Be specific and detailed for map and activity
-3. Never suggest places like non-public areas (i.e. home, company, etc.)
-4. Depends on the preference, you may suggest that might not surround with the given area
-5. The current location is just the starting point
+$PROMPT_REQUIREMENTS
 ''';
   }
 

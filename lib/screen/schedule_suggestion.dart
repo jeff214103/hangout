@@ -18,10 +18,12 @@ import 'dart:convert';
 
 class ResultPage extends StatefulWidget {
   final String initialPrompt;
+  final LatLng? selectedLocation;
 
   const ResultPage({
     super.key,
     required this.initialPrompt,
+    this.selectedLocation,
   });
 
   @override
@@ -56,13 +58,13 @@ class _ResultPageState extends State<ResultPage> {
   }
 
   Future<void> _regenerateWithFeedback() async {
-    final feedback = await showDialog<String>(
+    String? feedback = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
         title: Row(
           children: [
             Expanded(child: Text('Regenerate Suggestions')),
-            if (kDebugMode)
+            if (Provider.of<SettingProvider>(context, listen: false).debugMode)
               IconButton(
                 tooltip: 'Show Raw Chat',
                 onPressed: () {
@@ -85,7 +87,8 @@ class _ResultPageState extends State<ResultPage> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text("Not Satisfied? Please provide some feedback and regenerate for you:",
+              Text(
+                  "Not Satisfied? Please provide some feedback and regenerate for you:",
                   style: Theme.of(context).textTheme.labelLarge),
               TextField(
                 controller: _feedbackController,
@@ -110,7 +113,10 @@ class _ResultPageState extends State<ResultPage> {
       ),
     );
 
-    if (feedback != null && feedback.isNotEmpty) {
+    if (feedback != null) {
+      if (feedback.isEmpty) {
+        feedback = 'Suggest another schedule';
+      }
       setState(() {
         _chatResult = _sendPrompt(
             '''The user provided the following feedback of the result suggested: 
@@ -126,7 +132,7 @@ $PROMPT_REQUIREMENTS
 
   Future<List<Map<String, dynamic>>> _sendPrompt(String prompt) {
     return _chat.sendMessage(Content.text(prompt)).then((response) {
-      final List<dynamic> jsonList = jsonDecode(response.text!);
+      final List<dynamic> jsonList = jsonDecode(response.text??"[]");
       return jsonList.map((item) => Map<String, dynamic>.from(item)).toList();
     });
   }
@@ -156,7 +162,7 @@ $PROMPT_REQUIREMENTS
                 child: Text(snapshot.error.toString()),
               );
             } else if (snapshot.connectionState == ConnectionState.done) {
-              if (snapshot.data!.isEmpty) {
+              if (snapshot.data == null || snapshot.data!.isEmpty) {
                 return const Column(
                   children: [
                     Padding(
@@ -166,7 +172,8 @@ $PROMPT_REQUIREMENTS
                   ],
                 );
               }
-              return ScheduleSuggestion(activities: snapshot.data!);
+              return ScheduleSuggestion(
+                  activities: snapshot.data!, center: widget.selectedLocation);
             } else {
               return const Center(
                 child: LoadingHint(
@@ -183,10 +190,12 @@ $PROMPT_REQUIREMENTS
 
 class ScheduleSuggestion extends StatefulWidget {
   final List<Map<String, dynamic>> activities;
+  final LatLng? center;
 
   const ScheduleSuggestion({
     super.key,
     required this.activities,
+    this.center,
   });
 
   @override
@@ -198,7 +207,10 @@ class _ScheduleSuggestionState extends State<ScheduleSuggestion> {
   bool _showSideBySide = false;
   Map<String, Color> _activityTypeColors = {};
   final List<Marker> _markers = [];
+  final List<String> _failMarker = [];
   bool _isLoading = true;
+  double? _avgLat;
+  double? _avgLng;
 
   @override
   void initState() {
@@ -208,7 +220,7 @@ class _ScheduleSuggestionState extends State<ScheduleSuggestion> {
 
   Future<void> _initializeMap() async {
     _activityTypeColors = _generateActivityTypeColors();
-    await _updateActivitiesInfo();
+    await _updateActivitiesLatLng();
     _generateMarkers();
     setState(() => _isLoading = false);
   }
@@ -232,7 +244,13 @@ class _ScheduleSuggestionState extends State<ScheduleSuggestion> {
     return colors;
   }
 
-  Future<void> _updateActivitiesInfo() async {
+  Future<void> _updateActivitiesLatLng() async {
+    _avgLat = widget.center?.latitude;
+    _avgLng = widget.center?.longitude;
+
+    int successCount = (_avgLat != null && _avgLng != null) ? 1 : 0;
+    _failMarker.clear();
+
     // Add async here
     final futures = widget.activities.asMap().entries.map((entry) async {
       final index = entry.key;
@@ -246,16 +264,27 @@ class _ScheduleSuggestionState extends State<ScheduleSuggestion> {
           // Update the location map with lat and lng
           location['lat'] = latLng.latitude;
           location['lng'] = latLng.longitude;
+
+          _avgLat = (_avgLat ?? 0) + latLng.latitude;
+          _avgLng = (_avgLng ?? 0) + latLng.longitude;
+          successCount++;
         } else {
-          throw Exception('Failed to $index geocode address: $address');
+          throw Exception(
+              'Failed to get coordinates for $index location from address: $address');
         }
       } catch (e) {
-        print('Error $index geocoding address: $address\nerror: $e');
+        _failMarker
+            .add('Error getting coordinates for location $index\nDetails:\n$e');
+        if (kDebugMode) {
+          print('Error $index geocoding address: $address\nerror: $e');
+        }
       }
     });
 
     // Wait for all futures to complete
     await Future.wait(futures);
+    _avgLat = _avgLat != null ? _avgLat! / successCount : 0;
+    _avgLng = _avgLng != null ? _avgLng! / successCount : 0;
   }
 
   void _generateMarkers() {
@@ -299,8 +328,9 @@ class _ScheduleSuggestionState extends State<ScheduleSuggestion> {
       final response = await http.get(
         Uri.parse(url),
         headers: {
-          'User-Agent': 'YourAppName/1.0'
-        }, // Required by Nominatim's usage policy
+          'User-Agent': 'Hangout/1.0',
+          'Referer': 'https://hangout.itdogtics.com/',
+        },
       );
 
       if (response.statusCode == 200) {
@@ -311,12 +341,15 @@ class _ScheduleSuggestionState extends State<ScheduleSuggestion> {
             double.parse(result['lat']),
             double.parse(result['lon']),
           );
+        } else {
+          throw Exception('No results found for address: $address');
         }
+      } else {
+        throw Exception('Failed to fetch coordinates (Code ${response.statusCode}) for address: $address');
       }
     } catch (e) {
-      print('Error fetching coordinates: $e');
+      throw Exception('Error fetching coordinates: $e');
     }
-    return null;
   }
 
   Widget _buildMarker(int index, Map<String, dynamic> activity) {
@@ -457,6 +490,62 @@ class _ScheduleSuggestionState extends State<ScheduleSuggestion> {
                   ),
                 ),
               ),
+              if (Provider.of<SettingProvider>(context, listen: false)
+                      .debugMode &&
+                  _failMarker.isNotEmpty)
+                Align(
+                  alignment: Alignment.bottomLeft,
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: FloatingActionButton(
+                      onPressed: () {
+                        showDialog(
+                          context: context,
+                          builder: (context) => AlertDialog(
+                            title: Row(
+                              children: [
+                                Icon(Icons.warning, color: Colors.orange),
+                                SizedBox(width: 8),
+                                Expanded(
+                                  child: Text('Location Decoding Errors'),
+                                ),
+                              ],
+                            ),
+                            content: SingleChildScrollView(
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: _failMarker
+                                    .map((error) => Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                              vertical: 4.0),
+                                          child: Text(error),
+                                        ))
+                                    .toList(),
+                              ),
+                            ),
+                            actions: [
+                              TextButton(
+                                onPressed: () => Navigator.pop(context),
+                                child: const Text('Close'),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.warning, color: Colors.orange),
+                          SizedBox(width: 8),
+                          Text(
+                            _failMarker.length.toString(),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
             ],
           ),
         );
@@ -468,8 +557,7 @@ class _ScheduleSuggestionState extends State<ScheduleSuggestion> {
     return FlutterMap(
       mapController: _mapController,
       options: MapOptions(
-        initialCenter:
-            _markers.isNotEmpty ? _markers.first.point : const LatLng(0, 0),
+        initialCenter: LatLng(_avgLat!, _avgLng!),
         initialZoom: 13.0,
       ),
       children: [

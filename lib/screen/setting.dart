@@ -3,6 +3,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:hangout/providers/setting_provider.dart';
 import 'package:hangout/widget/dialog.dart';
 import 'package:url_launcher/link.dart';
+import 'package:provider/provider.dart';
 
 class SettingPage extends StatefulWidget {
   final SettingProvider settingProvider;
@@ -102,6 +103,18 @@ class _SettingPageState extends State<SettingPage> {
                     ).toList(),
                   ),
                 ),
+                Consumer<SettingProvider>(
+                    builder: (context, settingProvider, child) {
+                  return ListTile(
+                    title: const Text('Debug Mode'),
+                    subtitle: Switch(
+                      value: settingProvider.debugMode,
+                      onChanged: (bool value) {
+                        settingProvider.setDebugMode(value);
+                      },
+                    ),
+                  );
+                }),
                 const GeminiDisclaimer(),
                 const SizedBox(
                   height: 8,

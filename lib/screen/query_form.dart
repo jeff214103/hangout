@@ -272,6 +272,7 @@ class _QueryFormState extends State<QueryForm> {
                         MaterialPageRoute(
                           builder: (context) => ResultPage(
                             initialPrompt: prompt,
+                            selectedLocation: _selectedLocation,
                           ),
                         ),
                       );
